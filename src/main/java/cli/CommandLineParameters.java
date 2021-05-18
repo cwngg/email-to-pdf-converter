@@ -65,6 +65,9 @@ public class CommandLineParameters {
     @Parameter(names = {"-s", "--page-size"}, description = "Set wkhtmltopdf paper size to: A4, Letter, etc. (default A4)")
     private String pageSize = "A4";
 
+    @Parameter(names = {"-h", "--html"}, description = "Create HTML only")
+    private boolean html;
+
     public List<String> getFiles() {
         return files;
     }
@@ -167,5 +170,9 @@ public class CommandLineParameters {
 
     public void setPageSize(String pageSize) {
         this.pageSize = pageSize;
+    }
+
+    public boolean isHtml() {
+        return html;
     }
 }

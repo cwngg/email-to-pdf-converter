@@ -120,7 +120,11 @@ public class Main {
         extParams.add(cli.getPageSize());
 
         try {
-            MimeMessageConverter.convertToPdf(in, out, cli.isHideHeaders(), cli.isExtractAttachments(), cli.getExtractAttachmentsDir(), extParams);
+            if (cli.isHtml()) { 
+                MimeMessageConverter.convertToHtml(in, out, cli.isHideHeaders(), cli.isExtractAttachments(), cli.getExtractAttachmentsDir(), extParams);
+            } else {
+                MimeMessageConverter.convertToPdf(in, out, cli.isHideHeaders(), cli.isExtractAttachments(), cli.getExtractAttachmentsDir(), extParams);
+            }
         } catch (Exception e) {
             Logger.error("The email could not be converted. Error: %s", Throwables.getStackTraceAsString(e));
         }

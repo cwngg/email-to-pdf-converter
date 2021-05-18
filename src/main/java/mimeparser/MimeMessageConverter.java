@@ -41,6 +41,7 @@ import java.io.FileOutputStream;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.StandardCopyOption;
 import java.text.DateFormat;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -111,10 +112,10 @@ public class MimeMessageConverter {
     }
 
     /**
-     * Convert an email (eml, msg) file to PDF.
+     * Convert an email (eml, msg) file to HTML.
      * @throws Exception
      */
-    public static void convertToPdf(String emailFilePath, String pdfOutputPath, boolean hideHeaders, boolean extractAttachments, String attachmentsdir, List<String> extParams) throws Exception {
+    private static List <Object> _convertToHtmlDo(String emailFilePath, String pdfOutputPath, boolean hideHeaders, boolean extractAttachments, String attachmentsdir, List<String> extParams) throws Exception {
         Logger.info("Start converting %s to %s", emailFilePath, pdfOutputPath);
 
         final MimeMessage message;
@@ -258,39 +259,67 @@ public class MimeMessageConverter {
         Logger.info("Start conversion to pdf");
 
         File tmpHtmlHeader = null;
+        String headers = "";
+        URL headerResource = MimeMessageConverter.class.getClassLoader().getResource("header.html");
+        String tmpHtmlHeaderStr = Resources.toString(headerResource, StandardCharsets.UTF_8);
+
         if (!hideHeaders) {
-            tmpHtmlHeader = File.createTempFile("emailtopdf", ".html");
-
-            URL headerResource = MimeMessageConverter.class.getClassLoader().getResource("header.html");
-            String tmpHtmlHeaderStr = Resources.toString(headerResource, StandardCharsets.UTF_8);
-            String headers = "";
-
             if (!Strings.isNullOrEmpty(from)) {
-                headers += String.format(HEADER_FIELD_TEMPLATE, "From", HtmlEscapers.htmlEscaper().escape(from));
+                headers += String.format(HEADER_FIELD_TEMPLATE, "Von", HtmlEscapers.htmlEscaper().escape(from));
             }
 
             if (!Strings.isNullOrEmpty(subject)) {
-                headers += String.format(HEADER_FIELD_TEMPLATE, "Subject", "<b>" + HtmlEscapers.htmlEscaper().escape(subject) + "<b>");
+                headers += String.format(HEADER_FIELD_TEMPLATE, "Betreff", "<b>" + HtmlEscapers.htmlEscaper().escape(subject) + "<b>");
             }
 
             if (recipients.length > 0) {
-                headers += String.format(HEADER_FIELD_TEMPLATE, "To", HtmlEscapers.htmlEscaper().escape(Joiner.on(", ").join(recipients)));
+                headers += String.format(HEADER_FIELD_TEMPLATE, "An", HtmlEscapers.htmlEscaper().escape(Joiner.on(", ").join(recipients)));
             }
 
             if (!Strings.isNullOrEmpty(sentDateStr)) {
-                headers += String.format(HEADER_FIELD_TEMPLATE, "Date", HtmlEscapers.htmlEscaper().escape(sentDateStr));
+                headers += String.format(HEADER_FIELD_TEMPLATE, "Datum", HtmlEscapers.htmlEscaper().escape(sentDateStr));
             }
-
-            Files.asCharSink(tmpHtmlHeader, StandardCharsets.UTF_8).write(String.format(tmpHtmlHeaderStr, headers));
-
-            // Append this script tag dirty to the bottom
-            URL contentScriptResource = MimeMessageConverter.class.getClassLoader().getResource("contentScript.js");
-            htmlBody += String.format(ADD_HEADER_IFRAME_JS_TAG_TEMPLATE, tmpHtmlHeader.toURI(), Resources.toString(contentScriptResource, StandardCharsets.UTF_8));
         }
 
         File tmpHtml = File.createTempFile("emailtopdf", ".html");
         Logger.debug("Write html to temporary file %s", tmpHtml.getAbsolutePath());
-        Files.asCharSink(tmpHtml, Charset.forName(charsetName)).write(htmlBody);
+        headers = String.format(tmpHtmlHeaderStr, headers, htmlBody);
+        Files.asCharSink(tmpHtml, StandardCharsets.UTF_8).write(headers);
+
+        List <Object> ret = new ArrayList<>();
+        ret.add(tmpHtml);
+        ret.add(tmpHtmlHeader);
+        ret.add(charsetName);
+        ret.add(message);
+        return ret;
+    }
+
+    /**
+     * Convert an email (eml, msg) file to HTML.
+     * @throws Exception
+     */
+    public static void convertToHtml(String emailFilePath, String outputPath, boolean hideHeaders, boolean extractAttachments, String attachmentsdir, List<String> extParams) throws Exception {
+        Logger.info("Start converting %s to %s", emailFilePath, outputPath);
+
+        List <Object> tmp = MimeMessageConverter._convertToHtmlDo(emailFilePath, outputPath, hideHeaders, extractAttachments, attachmentsdir, extParams);
+        File tmpHtml = (File) tmp.get(0);
+        System.out.println(tmpHtml.getAbsolutePath());
+
+        Files.copy(tmpHtml, new File(outputPath));
+    }
+
+    /**
+     * Convert an email (eml, msg) file to PDF.
+     * @throws Exception
+     */
+    public static void convertToPdf(String emailFilePath, String pdfOutputPath, boolean hideHeaders, boolean extractAttachments, String attachmentsdir, List<String> extParams) throws Exception {
+        Logger.info("Start converting %s to %s", emailFilePath, pdfOutputPath);
+
+        List <Object> tmp = MimeMessageConverter._convertToHtmlDo(emailFilePath, pdfOutputPath, hideHeaders, extractAttachments, attachmentsdir, extParams);
+        File tmpHtml = (File) tmp.get(0);
+        File tmpHtmlHeader = (File) tmp.get(1);
+        String charsetName = (String) tmp.get(2);
+        MimeMessage message = (MimeMessage) tmp.get(3);
 
         File pdf = new File(pdfOutputPath);
         Logger.debug("Write pdf to %s", pdf.getAbsolutePath());
@@ -321,8 +350,6 @@ public class MimeMessageConverter {
 
         /* ######### Save attachments ######### */
         if (extractAttachments) {
-            Logger.debug("Start extracting attachments");
-
             File attachmentDir;
             if (!Strings.isNullOrEmpty(attachmentsdir)) {
                 attachmentDir = new File(attachmentsdir);
@@ -331,55 +358,76 @@ public class MimeMessageConverter {
             }
 
             attachmentDir.mkdirs();
-
             Logger.info("Extract attachments to %s", attachmentDir.getAbsolutePath());
-
-            List<AttachmentResource> attachments = EmailConverter.mimeMessageToEmail(message).getAttachments();
-
-            Logger.debug("Found %s attachments", attachments.size());
-            for (int i = 0; i < attachments.size(); i++) {
-                File attachFile = null;
-                try {
-                    Logger.debug("Process Attachment %s", i);
-
-                    AttachmentResource attachmentResource = attachments.get(i);
-
-                    String attachmentFilename = null;
-                    try {
-                        attachmentFilename = attachmentResource.getDataSource().getName();
-                    } catch (Exception e) {
-                        // ignore this error
-                    }
-
-                    if (!Strings.isNullOrEmpty(attachmentFilename)) {
-                        attachFile = new File(attachmentDir, attachmentFilename);
-                    } else {
-                        String extension = "";
-
-                        // try to find at least the file extension via the mime type
-                        try {
-                            extension = MimeTypes.getDefaultMimeTypes().forName(attachmentResource.getDataSource().getContentType()).getExtension();
-                        } catch (Exception e) {
-                            // ignore this error
-                        }
-
-                        Logger.debug("Attachment %s did not hold any name, use random name", i);
-                        attachFile = File.createTempFile("nameless-", extension, attachmentDir);
-                    }
-
-                    try (FileOutputStream fos = new FileOutputStream(attachFile)) {
-                        ByteStreams.copy(attachmentResource.getDataSourceInputStream(), fos);
-                    }
-
-                    Logger.debug("Saved Attachment %s to %s", i, attachFile.getAbsolutePath());
-
-                    attachFile = null;
-                } catch (Exception e) {
-                    Logger.error("Could not save attachment to %s. Error: %s", attachFile, Throwables.getStackTraceAsString(e));
-                }
-            }
+            MimeMessageConverter._extractAttachments(message, attachmentDir);
         }
 
         Logger.info("Conversion finished");
     }
+
+    public static void extractAttachments(String emailFilePath, String attachmentsdir) throws Exception {
+        final MimeMessage message;
+        if (emailFilePath.toLowerCase().endsWith(".msg")) {
+            Logger.debug("Read msg file from %s, convert it to eml", emailFilePath);
+            message = new MimeMessage(null, new ByteArrayInputStream(EmailConverter.outlookMsgToEML(new FileInputStream(emailFilePath)).getBytes(StandardCharsets.UTF_8)));
+        } else {
+            Logger.debug("Read eml file from %s", emailFilePath);
+            message = new MimeMessage(null, new FileInputStream(emailFilePath));
+        }
+
+        File attachmentDir;
+        attachmentDir = new File(attachmentsdir);
+        attachmentDir.mkdirs();
+
+        MimeMessageConverter._extractAttachments(message, attachmentDir);
+    }
+
+    private static void _extractAttachments(MimeMessage message, File attachmentDir) throws Exception {
+        Logger.debug("Start extracting attachments");
+
+        List<AttachmentResource> attachments = EmailConverter.mimeMessageToEmail(message).getAttachments();
+
+        Logger.debug("Found %s attachments", attachments.size());
+        for (int i = 0; i < attachments.size(); i++) {
+            File attachFile = null;
+            try {
+                Logger.debug("Process Attachment %s", i);
+
+                AttachmentResource attachmentResource = attachments.get(i);
+
+                String attachmentFilename = null;
+                try {
+                    attachmentFilename = attachmentResource.getDataSource().getName();
+                } catch (Exception e) {
+                    // ignore this error
+                }
+
+                if (!Strings.isNullOrEmpty(attachmentFilename)) {
+                    attachFile = new File(attachmentDir, attachmentFilename);
+                } else {
+                    String extension = "";
+
+                    // try to find at least the file extension via the mime type
+                    try {
+                        extension = MimeTypes.getDefaultMimeTypes().forName(attachmentResource.getDataSource().getContentType()).getExtension();
+                    } catch (Exception e) {
+                        // ignore this error
+                    }
+
+                    Logger.debug("Attachment %s did not hold any name, use random name", i);
+                    attachFile = File.createTempFile("nameless-", extension, attachmentDir);
+                }
+
+                try (FileOutputStream fos = new FileOutputStream(attachFile)) {
+                    ByteStreams.copy(attachmentResource.getDataSourceInputStream(), fos);
+                }
+
+                Logger.debug("Saved Attachment %s to %s", i, attachFile.getAbsolutePath());
+
+                attachFile = null;
+            } catch (Exception e) {
+                Logger.error("Could not save attachment to %s. Error: %s", attachFile, Throwables.getStackTraceAsString(e));
+            }
+        }
+    } 
 }

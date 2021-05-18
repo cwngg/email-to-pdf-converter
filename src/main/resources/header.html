@@ -17,7 +17,8 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
+<meta charset="utf-8"></meta>
+<meta http-equiv="content-type" content="text/html; charset=utf-8"></meta>
 <title></title>
 
 <style>
@@ -49,23 +50,12 @@ html, body {
 }
 </style>
 
-<script type="text/javascript">
-	function timer() {
-		try {
-			parent.postMessage(Math.max(document.body.offsetHeight, document.body.scrollHeight), '*');
-		} catch (r) {
-		}
-		
-		setTimeout(timer, 10);
-	};
-	
-	timer();
-</script>
-
 </head>
 <body>
   <table id="header_fields">
     <tbody>%s</tbody>
   </table>
+  <br />
+  %s
 </body>
 </html>
